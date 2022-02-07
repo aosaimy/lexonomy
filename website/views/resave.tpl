@@ -16,7 +16,7 @@
 		<script type="text/javascript">
                 Screenful.User.loggedin={{!JSON(user["loggedin"])}};
                 Screenful.User.username="{{user['email']}}";
-		Screenful.Progress.message="Lexonomy is re-indexing your dictionary.";
+		Screenful.Progress.message=Screenful.loc("Lexonomy is re-indexing your dictionary.");
 		Screenful.Progress.actionUrl="../../../{{dictID}}/resave.json";
 		Screenful.Progress.awayUrl="{{awayUrl}}";
 		Screenful.Progress.totalTodo={{todo}};

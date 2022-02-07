@@ -25,6 +25,7 @@
 		Screenful.Job.state={filename: "{{filename}}", uploadStart: "{{uploadStart}}"};
 		Screenful.Job.awayUrl="../resave/";
 		</script>
+		<link type="text/css" rel="stylesheet" href="../../furniture/ui.css" />
 		%if siteconfig["rtl"]:
 			<link type="text/css" rel="stylesheet" href="{{siteconfig["baseUrl"]}}/furniture/rtl.css" />
 		%end

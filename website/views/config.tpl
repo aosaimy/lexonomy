@@ -29,7 +29,7 @@
                 %include("header.tpl", i18n=i18n,user=user, dictID=dictID, dictTitle=dictTitle, current="config", configTitle="", configUrl="", rootPath="../../")
 		<div id="pagebody">
 			%if needResave>0:
-			<div class="notification">{{needResave}} {{"entry" if needResave==1 else "entries"}} in your dictionary needs to be re-indexed. <a href="../../{{dictID}}/resave/">Do it now&nbsp;»</a></div>
+			<div class="notification">{{needResave}} {{i18n["entry" if needResave==1 else "entries"]}} {{i18n["in your dictionary needs to be re-indexed."]}} <a href="../../{{dictID}}/resave/">{{i18n["Do it now"]}}</span>&nbsp;»</a></div>
 			%end
 			<div class="field">
 				<div class="signposts">
@@ -83,7 +83,7 @@
 					<a href="javascript:void(null)" class="destroy" onclick="destroy()">{{i18n["Delete the dictionary"]}}</a>
 					<script type="text/javascript">
 					function destroy(){
-						if(confirm("Careful now! You will not be able to undo this.")){
+						if(confirm(Screenful.loc("Careful now! You will not be able to undo this."))){
 							$.ajax({url: "../../{{dictID}}/destroy.json", dataType: "json", method: "POST", data: {}}).done(function(data){
 								if(data.success) window.location="../../";
 							});

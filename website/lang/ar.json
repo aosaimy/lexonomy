@@ -303,5 +303,9 @@
   "Please setup your Sketch Engine account in your <a href=\"/userprofile\">profile</a> settings to be able to select a corpus.": "يرجى إعداد حساب SketchEngine في إعدادات <a href='/userprofile'>الملف الشخصي</a> لتتمكن من تحديد المدونة.",
   "Elements listed here function as subentries which can be shared by multiple entries.": "تعمل العناصر المدرجة هنا كمدخلات فرعية يمكن مشاركتها بواسطة إدخالات متعددة.",
   "Add": "إضافة",
+  "in your dictionary needs to be re-indexed.": "في المعجم تحتاج إلى إعادة فهرسة.",
+  "Do it now": "قم بها الآن.",
+  "entry": "مدخل معجمي",
+  "entries": "مداخل معجمية",
   "------------------------------End": "End"
 }

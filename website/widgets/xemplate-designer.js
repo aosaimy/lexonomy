@@ -81,6 +81,7 @@ XemplateDesigner.renderAttribute=function(elName, atName){
     XemplateDesigner.renderAttributeStyles(elName, atName);
     XemplateDesigner.renderAttributeLabel(elName, atName);
   }
+  if (doI18n) doI18n();
 };
 
 XemplateDesigner.renderElementLabel=function(elName){

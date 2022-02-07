@@ -199,6 +199,14 @@ Screenful.Loc = {
   "Line break before and after": "سطر جديد قبل وبعد",
   Inline: "مع النص",
   Appearance: "مظهر خارجي",
+  "Before element content": "قبل محتوى العنصر",
+  "After element content": "بعد محتوى العنصر",
+  "Really delete link?": "هل أنت متأكد أنك تريد حذف الرابط؟",
+  "Careful now! You will not be able to undo this.":
+    "انتباه! لن تستطيع التراجع بعد الموافقة.",
+  "Direct link to view this entry": "رابط مباشر لعرض المادة",
+  "Direct link to edit this entry": "رابط مباشر لتحرير المادة",
+  "Lexonomy is re-indexing your dictionary.": "جاري إعادة فهرسة المعجم",
 };
 notFoundLoc = {}
 doI18n = () => {

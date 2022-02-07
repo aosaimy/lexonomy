@@ -300,7 +300,7 @@ Screenful.Editor={
         }
       }
       $('.linkdelete').on("click", function() {
-        if (confirm('Really delete link?')) {
+        if (confirm(Screenful.loc('Really delete link?'))) {
           $.ajax({url: $(this).data('href'), method: "GET"}).done(function(data){
             Screenful.Editor.addLinks(linkUrl, linkElement, entryID);
           });
@@ -478,6 +478,7 @@ Screenful.Editor={
     Screenful.Editor.needsSaving=true;
     $("#butSave .star").show();
     if($("#chkAutosave").prop("checked")) Screenful.Editor.save();
+    if (doI18n) doI18n();
   },
   history: function(){
     if(!Screenful.Editor.needsSaving || confirm(Screenful.Loc.unsavedConfirm)){ //"are you sure?"
@@ -519,10 +520,10 @@ Screenful.Editor={
   showLink: function() {
     var link = Screenful.Editor.getDirectLink(true);
     if (Screenful.Editor.entryID && $("#viewer").length>0) {
-      prompt("Direct link to view this entry", link);
+      prompt(Screenful.loc("Direct link to view this entry"), link);
     }
     if (Screenful.Editor.entryID && $("#editor").length>0) {
-      prompt("Direct link to edit this entry", link);
+      prompt(Screenful.loc("Direct link to edit this entry"), link);
     }
   },
   clone: function(event){
