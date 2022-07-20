@@ -1,15 +1,15 @@
-const path=require("path");
-const fs=require("fs");
+const path = require("path");
+const fs = require("fs");
 
-var siteconfig = {}
+var siteconfig = {};
 
 function siteconfig_file() {
-  if(process.env.LEXONOMY_SITECONFIG !== undefined) {
+  if (process.env.LEXONOMY_SITECONFIG !== undefined) {
     var mypath = process.env.LEXONOMY_SITECONFIG;
-    if(fs.existsSync(mypath)) {
+    if (fs.existsSync(mypath)) {
       return mypath;
     } else {
-      throw Error(`Cannot locate $LEXONOMY_SITECONFIG file: ${ mypath }`);
+      throw Error(`Cannot locate $LEXONOMY_SITECONFIG file: ${mypath}`);
     }
   }
   return path.join(__dirname, "siteconfig.json");
@@ -25,4 +25,4 @@ function load() {
 
 siteconfig.load = load;
 siteconfig.reload = load;
-module.exports = siteconfig
+module.exports = siteconfig;
