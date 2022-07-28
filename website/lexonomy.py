@@ -16,7 +16,7 @@ import bottle
 from bottle import (hook, route, get, post, run, template, error, request,
                     response, static_file, abort, redirect, install)
 import pyarabic.araby as araby
-import pandas as pd
+# import pandas as pd
 
 i18nDump = json.dumps(i18n, ensure_ascii=False);
 # configuration
@@ -963,7 +963,7 @@ def mostSearched():
 @get(siteconfig["rootPath"]+"dailyWords.json")
 def dailyWords2():
     def1=[]
-    x=ops.dailyWords()
+    x=ops.dailyWords() #set True if you want to add daily words for a year
     dictDB=ops.getDB(x["dict_id"])
     configs = ops.readDictConfigs(dictDB)
     adjustedEntryID, xml, _title = ops.readEntry(dictDB, configs, x["id"])

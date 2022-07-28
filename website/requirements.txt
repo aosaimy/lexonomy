@@ -11,4 +11,4 @@ mysql-connector-python
 pyarabic
 google-cloud-translate
 cachetools
-pandas
+# pandas

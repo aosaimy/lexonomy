@@ -34,7 +34,7 @@ CREATE TABLE `dicts` (
   `id` varchar(100) NOT NULL,
   `title` varchar(256) DEFAULT NULL,
   `language` varchar(256) DEFAULT NULL,
-  `blurb` varchar(256) DEFAULT NULL;
+  `blurb` varchar(256) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- --------------------------------------------------------
