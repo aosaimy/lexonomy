@@ -4,7 +4,7 @@
 <html>
 	<head>
 		%include("head.tpl")
-		<title>Lexonomy Users</title>
+		<title i18n>Lexonomy Users</title>
 		<script type="text/javascript" src="../libs/screenful/screenful.js"></script>
 		<link type="text/css" rel="stylesheet" href="../libs/screenful/screenful.css" />
 		<script type="text/javascript" src="../libs/screenful/screenful-loc-{{siteconfig['lang']}}.js"></script>
@@ -24,7 +24,7 @@
 		Screenful.Navigator.stepSize=1000;
 		Screenful.Navigator.showNumbers=false;
 		Screenful.Navigator.sortDesc=false;
-		Screenful.Navigator.flags="[]";
+		Screenful.Navigator.flags=[];
 		Screenful.Navigator.editorUrl="../users/editor/";
 		Screenful.Navigator.renderer=function(div, entry, searchtext){
 			var text=entry.title;

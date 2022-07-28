@@ -7,14 +7,18 @@ import ops
 import re
 import jwt
 import json
+import requests
 import datetime
 import urllib.request
-from ops import siteconfig, i18n
+from ops import siteconfig, i18n, enable_cors
 import media
 import bottle
 from bottle import (hook, route, get, post, run, template, error, request,
                     response, static_file, abort, redirect, install)
+import pyarabic.araby as araby
+import pandas as pd
 
+i18nDump = json.dumps(i18n, ensure_ascii=False);
 # configuration
 app = bottle.default_app()
 app.config['autojson'] = True
@@ -36,6 +40,40 @@ if not cgi and len(sys.argv) > 1:
         print(sys.argv, file=sys.stderr)
         sys.exit(1)
     my_url = sys.argv[1]
+
+class EnableCors(object):
+    name = 'enable_cors'
+    api = 2
+
+    def apply(self, fn, context):
+        def _enable_cors(*args, **kwargs):
+            # set CORS headers
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Origin, Accept, Content-Type, X-Requested-With, X-CSRF-Token'
+
+            if bottle.request.method != 'OPTIONS':
+                # actual request; reply with the actual response
+                return fn(*args, **kwargs)
+
+        return _enable_cors
+
+@error(405)
+def method_not_allowed(res):
+    if request.method == 'OPTIONS':
+        new_res = bottle.HTTPResponse()
+        new_res.set_header('Access-Control-Allow-Origin', '*')
+        new_res.set_header('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS')
+        new_res.set_header('Access-Control-Allow-Headers', 'Origin, Content-Type, X-Auth-Token')
+
+        return new_res
+    res.headers['Allow'] += ', OPTIONS'
+    return request.app.default_error_handler(res)
+
+@hook('after_request')
+def enableCORSAfterRequestHook():
+    response.set_header('Access-Control-Allow-Origin', '*')
+
 
 # serve static files
 @route('/<path:re:(widgets|furniture|libs).*>')
@@ -70,6 +108,7 @@ def profiler(callback):
         return body
     return wrapper
 install(profiler)
+install(EnableCors())
 
 # authentication decorator
 # use @authDict(["canEdit", "canConfig", "canUpload", "canDownload"]) before any handler
@@ -144,7 +183,7 @@ def home():
     if request.cookies.jwt_error:
         error = request.cookies.jwt_error
         response.delete_cookie("jwt_error", path="/")
-    return template("home.tpl", **{"user": res, "siteconfig": siteconfig, "i18n": i18n, "dicts": dicts, "error": error, "version": version})
+    return template("home.tpl", **{"user": res, "siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "dicts": dicts, "error": error, "version": version})
 
 @post(siteconfig["rootPath"] + "<dictID>/entrydelete.json")
 @authDict(["canEdit"])
@@ -152,9 +191,13 @@ def entrydelete(dictID, user, dictDB, configs):
     ops.deleteEntry(dictDB, request.forms.id, user["email"])
     return {"success": True, "id": request.forms.id}
 
+
+@enable_cors
 @post(siteconfig["rootPath"]+"<dictID>/entryread.json")
 @authDict([])
 def entryread(dictID, user, dictDB, configs):
+    # if request.forms.dictID:
+    #     dictDB=getDB(request.forms.dictID)
     adjustedEntryID, xml, _title = ops.readEntry(dictDB, configs, request.forms.id)
     adjustedEntryID = int(adjustedEntryID)
     xml = xml.replace(">\n<", "><")
@@ -174,7 +217,7 @@ def entryread(dictID, user, dictDB, configs):
 @post(siteconfig["rootPath"]+"<dictID>/entryupdate.json")
 @authDict(["canEdit"])
 def entryupdate(dictID, user, dictDB, configs):
-    adjustedEntryID, adjustedXml, changed, feedback = ops.updateEntry(dictDB, configs, request.forms.id, request.forms.content, user["email"], {})
+    adjustedEntryID, adjustedXml, changed, feedback = ops.updateEntry(dictID, dictDB, configs, request.forms.id, request.forms.content, user["email"], {})
     html = ""
     if configs["xemplate"].get("_xsl") and configs["xemplate"]["_xsl"] != "":
         import lxml.etree as ET
@@ -197,7 +240,7 @@ def entryupdate(dictID, user, dictDB, configs):
 @post(siteconfig["rootPath"]+"<dictID>/entrycreate.json")
 @authDict(["canEdit"])
 def entrycreate(dictID, user, dictDB, configs):
-    adjustedEntryID, adjustedXml, feedback = ops.createEntry(dictDB, configs, None, request.forms.content, user["email"], {})
+    adjustedEntryID, adjustedXml, feedback = ops.createEntry(dictID, dictDB, configs, None, request.forms.content, user["email"], {})
     html = ""
     if configs["xemplate"].get("_xsl") and configs["xemplate"]["_xsl"] != "":
         import lxml.etree as ET
@@ -256,7 +299,7 @@ def history(dictID):
 @get(siteconfig["rootPath"] + "consent")
 @auth
 def consent(user):
-    return template("consent.tpl", **{"user": user, "siteconfig": siteconfig, "i18n": i18n})
+    return template("consent.tpl", **{"user": user, "siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump})
 
 @post(siteconfig["rootPath"] + "consent.json")
 @auth
@@ -367,7 +410,7 @@ def login():
         referer = "/"
     else:
         referer = request.headers["Referer"]
-    return template("login.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "redirectUrl": referer})
+    return template("login.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "redirectUrl": referer})
 
 @post(siteconfig["rootPath"] + "login.json")
 def check_login():
@@ -398,7 +441,7 @@ def signup():
     res = ops.verifyLogin(request.cookies.email, request.cookies.sessionkey)
     if res["loggedin"]:
         return redirect("/")
-    return template("signup.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "redirectUrl": "/"})
+    return template("signup.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "redirectUrl": "/"})
 
 @post(siteconfig["rootPath"] + "signup.json")
 def send_signup():
@@ -412,7 +455,7 @@ def create_account(token):
     if res["loggedin"]:
         return redirect("/")
     valid = ops.verifyToken(token, "register")
-    return template("createaccount.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "redirectUrl": "/", "token": token, "tokenValid": valid})
+    return template("createaccount.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "redirectUrl": "/", "token": token, "tokenValid": valid})
 
 @post(siteconfig["rootPath"] + "createaccount.json")
 def do_create_account():
@@ -425,7 +468,7 @@ def forgot():
     res = ops.verifyLogin(request.cookies.email, request.cookies.sessionkey)
     if res["loggedin"]:
         return redirect("/")
-    return template("forgotpwd.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "redirectUrl": "/"})
+    return template("forgotpwd.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "redirectUrl": "/"})
 
 @post(siteconfig["rootPath"] + "forgotpwd.json")
 def forgotpwd():
@@ -439,7 +482,7 @@ def recover_pwd(token):
     if res["loggedin"]:
         return redirect("/")
     valid = ops.verifyToken(token, "recovery")
-    return template("recoverpwd.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "redirectUrl": "/", "token": token, "tokenValid": valid})
+    return template("recoverpwd.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "redirectUrl": "/", "token": token, "tokenValid": valid})
 
 @post(siteconfig["rootPath"] + "recoverpwd.json")
 def do_recover_pwd():
@@ -456,7 +499,7 @@ def userprofile(user):
         referer = "/"
     else:
         referer = request.headers["Referer"]
-    return template("userprofile.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "redirectUrl": referer, "user": user})
+    return template("userprofile.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "redirectUrl": referer, "user": user})
 
 @get(siteconfig["rootPath"] + "userprofile.json")
 def userprofilejson():
@@ -467,7 +510,7 @@ def userprofilejson():
 @get(siteconfig["rootPath"] + "make")
 @auth
 def makedict(user):
-    return template("make.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "suggested": ops.suggestDictId(), "user": user})
+    return template("make.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "suggested": ops.suggestDictId(), "user": user})
 
 @post(siteconfig["rootPath"] + "make.json")
 @auth
@@ -539,19 +582,19 @@ def getdoc(file):
     resDoc = ops.getDoc(file)
     if resDoc:
         res = ops.verifyLogin(request.cookies.email, request.cookies.sessionkey)
-        return template("doc.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": res, "doc": resDoc})
+        return template("doc.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": res, "doc": resDoc})
     else:
         return static_file("/docs/"+file, root="./")    
 
 @get(siteconfig["rootPath"] + "users")
 @authAdmin
 def users(user):
-    return template("users.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user})
+    return template("users.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user})
 
 @get(siteconfig["rootPath"] + "users/editor")
 @authAdmin
 def usereditor(user):
-    return template("usereditor.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user})
+    return template("usereditor.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user})
 
 @post(siteconfig["rootPath"] + "users/userlist.json")
 @authAdmin
@@ -589,12 +632,12 @@ def userread(user):
 @get(siteconfig["rootPath"] + "dicts")
 @authAdmin
 def dicts(user):
-    return template("dicts.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user})
+    return template("dicts.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user})
 
 @get(siteconfig["rootPath"] + "dicts/editor")
 @authAdmin
 def dicteditor(user):
-    return template("dicteditor.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user})
+    return template("dicteditor.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user})
 
 @post(siteconfig["rootPath"] + "dicts/dictlist.json")
 @authAdmin
@@ -629,7 +672,7 @@ def publicdict(dictID):
         return redirect("/")
     user, configs = ops.verifyLoginAndDictAccess(request.cookies.email, request.cookies.sessionkey, ops.getDB(dictID))
     blurb = ops.markdown_text(configs["ident"]["blurb"])
-    return template("dict.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "dictBlurb": blurb, "publico": configs["publico"]})
+    return template("dict.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "dictBlurb": blurb, "publico": configs["publico"]})
 
 @get(siteconfig["rootPath"]+"<dictID>/<entryID:re:\d+>")
 def publicentry(dictID, entryID):
@@ -661,7 +704,7 @@ def publicentry(dictID, entryID):
     css = ""
     if "_css" in configs["xemplate"]:
         css = configs["xemplate"]["_css"]
-    return template("dict-entry.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "dictBlurb": configs["ident"]["blurb"], "publico": configs["publico"], "entryID": adjustedEntryID, "nabes": nabes, "html": html, "title": _title, "css": css})
+    return template("dict-entry.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "dictBlurb": configs["ident"]["blurb"], "publico": configs["publico"], "entryID": adjustedEntryID, "nabes": nabes, "html": html, "title": _title, "css": css})
 
 @get(siteconfig["rootPath"]+"<dictID>/<entryID:re:\d+>.xml")
 def publicentryxml(dictID, entryID):
@@ -698,7 +741,7 @@ def randomone(dictID, user, dictDB, configs):
 @get(siteconfig["rootPath"]+"<dictID>/download")
 @authDict(["canDownload"], True)
 def download(dictID, user, dictDB, configs):
-    return template("download.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"]})
+    return template("download.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"]})
 
 @get(siteconfig["rootPath"]+"<dictID>/download.xml")
 @authDict(["canDownload"], True)
@@ -710,7 +753,7 @@ def downloadxml(dictID, user, dictDB, configs):
 @get(siteconfig["rootPath"]+"<dictID>/upload")
 @authDict(["canUpload"], True)
 def upload(dictID, user, dictDB, configs):
-    return template("upload.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"]})
+    return template("upload.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"]})
 
 @post(siteconfig["rootPath"]+"<dictID>/upload.html")
 @authDict(["canUpload"])
@@ -731,7 +774,7 @@ def uploadhtml(dictID, user, dictDB, configs):
 @get(siteconfig["rootPath"]+"<dictID>/import")
 @authDict(["canUpload"], True)
 def importhtml(dictID, user, dictDB, configs):
-    return template("import.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "filename": request.query.file, "uploadStart": request.query.uploadStart})
+    return template("import.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "filename": request.query.file, "uploadStart": request.query.uploadStart})
 
 @get(siteconfig["rootPath"]+"<dictID>/import.json")
 @authDict(["canUpload"])
@@ -744,12 +787,12 @@ def importjson(dictID, user, dictDB, configs):
         response.set_header("Content-Disposition", "attachment; filename=error.log")
         return ops.showImportErrors(request.query.filename, truncate)
     else:
-        return ops.importfile(dictID, request.query.filename, user["email"])
+       return ops.importfile(dictID, request.query.filename, user["email"])
 
 @get(siteconfig["rootPath"]+"<dictID>/edit")
 @authDict(["canEdit"], True)
 def dictedit(dictID, user, dictDB, configs):
-    return redirect("/"+dictID+"/edit/"+configs["xema"]["root"])
+    return redirect(siteconfig["baseUrl"]+dictID+"/edit/"+configs["xema"]["root"])
 
 @get(siteconfig["rootPath"]+"<dictID>/edit/<doctype>/<selectedID>")
 @get(siteconfig["rootPath"]+"<dictID>/edit/<doctype>")
@@ -759,7 +802,7 @@ def dicteditdoc(dictID, doctype, user, dictDB, configs, selectedID=""):
     doctypes = [configs["xema"]["root"]] + list(configs["subbing"].keys()) + doctypesUsed
     doctypes = list(set(doctypes))
     numberEntries = configs["titling"]["numberEntries"] if "numberEntries" in configs["titling"] else 1000 # magic number again, still better than before, will not refactor to really fix
-    return template("edit.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "flagging":configs["flagging"], "doctypes": doctypes, "doctype": doctype, "xonomyMode": configs["editing"]["xonomyMode"], "numberEntries": numberEntries, "selectedID": selectedID})
+    return template("edit.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "flagging":configs["flagging"], "doctypes": doctypes, "doctype": doctype, "xonomyMode": configs["editing"]["xonomyMode"], "numberEntries": numberEntries, "selectedID": selectedID})
 
 @get(siteconfig["rootPath"]+"<dictID>/<doctype>/entryeditor")
 @authDict(["canEdit"], True)
@@ -770,7 +813,7 @@ def entryeditor(dictID, doctype, user, dictDB, configs):
     userdicts = ops.getDictsByUser(user["email"])
     if doctype in configs["xema"]["elements"]:
         configs["xema"]["root"] = doctype
-    return template("entryeditor.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user, "dictID": dictID, "flagging":configs["flagging"], "doctype": doctype, "xema": configs["xema"], "xemplate": configs["xemplate"], "kex": configs["kex"], "xampl": configs["xampl"], "thes": configs["thes"], "collx": configs["collx"], "defo": configs["defo"], "titling": configs["titling"], "css": configs["xemplate"].get("_css"), "editing": configs["editing"], "subbing": configs["subbing"], "linking": configs["links"], "gapi": configs["gapi"], "userdicts": userdicts})
+    return template("entryeditor.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user, "dictID": dictID, "flagging":configs["flagging"], "doctype": doctype, "xema": configs["xema"], "xemplate": configs["xemplate"], "kex": configs["kex"], "xampl": configs["xampl"], "thes": configs["thes"], "collx": configs["collx"], "defo": configs["defo"], "titling": configs["titling"], "css": configs["xemplate"].get("_css"), "editing": configs["editing"], "subbing": configs["subbing"], "linking": configs["links"], "gapi": configs["gapi"], "userdicts": userdicts})
 
 @post(siteconfig["rootPath"]+"<dictID>/<doctype>/entrylist.json")
 @authDict(["canEdit"])
@@ -790,7 +833,7 @@ def entrylist(dictID, doctype, user, dictDB, configs):
 @authDict(["canConfig"], True)
 def config(dictID, user, dictDB, configs):
     stats = ops.getDictStats(dictDB)
-    return template("config.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "needResave": stats["needResave"], "hasXemaOverride": (("_xonomyDocSpec" in configs["xema"] and configs["xema"]["_xonomyDocSpec"] != "") or ("_dtd" in configs["xema"] and configs["xema"]["_dtd"] != "")), "hasXemplateOverride": (("_xsl" in configs["xemplate"] and configs["xemplate"]["_xsl"] != "") or ("_css" in configs["xemplate"] and configs["xemplate"]["_css"] != "")), "hasEditingOverride": ("_js" in configs["editing"] and configs["editing"]["_js"] != "")})
+    return template("config.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "needResave": stats["needResave"], "hasXemaOverride": (("_xonomyDocSpec" in configs["xema"] and configs["xema"]["_xonomyDocSpec"] != "") or ("_dtd" in configs["xema"] and configs["xema"]["_dtd"] != "")), "hasXemplateOverride": (("_xsl" in configs["xemplate"] and configs["xemplate"]["_xsl"] != "") or ("_css" in configs["xemplate"] and configs["xemplate"]["_css"] != "")), "hasEditingOverride": ("_js" in configs["editing"] and configs["editing"]["_js"] != "")})
 
 @get(siteconfig["rootPath"]+"<dictID>/config/<page>")
 @authDict(["canConfig"], True)
@@ -800,11 +843,14 @@ def configpage(dictID, page, user, dictDB, configs):
         lang_codes = ops.get_iso639_1()
     if page == "titling":
         lang_codes = ops.get_locales()
-    return template("config-"+page+".tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "xema": configs["xema"], "titling": configs["titling"], "flagging": configs["flagging"], "langs": lang_codes})
+    return template("config-"+page+".tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "xema": configs["xema"], "titling": configs["titling"], "flagging": configs["flagging"], "langs": lang_codes})
 
 @post(siteconfig["rootPath"]+"<dictID>/configread.json")
 @authDict(["canConfig"])
 def configread(dictID, user, dictDB, configs):
+    #brief: if dict is public ==> insert entries to gloabal searchable
+    if configs[request.forms.id]["public"]:
+        ops.insertToGlobalSearchables(dictID)
     return {"success": True, "id": request.forms.id, "content": configs[request.forms.id]}
 
 @post(siteconfig["rootPath"]+"<dictID>/configupdate.json")
@@ -850,15 +896,98 @@ def dictsearch(dictID):
         redirect("/"+dictID+"/"+entries[0]["id"])
     else:
         nabes = ops.readNabesByText(dictDB, dictID, configs, request.query.q)
-        return template("dict-search.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "dictBlurb": configs["ident"]["blurb"], "publico": configs["publico"], "q": request.query.q, "entries": entries, "nabes": nabes})
+        return template("dict-search.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "dictBlurb": configs["ident"]["blurb"], "publico": configs["publico"], "q": request.query.q, "entries": entries, "nabes": nabes})
 
+@enable_cors
+@get(siteconfig["rootPath"]+"<dictID>/search.json")
+def dictsearch(dictID):
+    if not ops.dictExists(dictID):
+        return {"ok": False}
+    dictDB = ops.getDB(dictID)
+    user, configs = ops.verifyLoginAndDictAccess(request.cookies.email, request.cookies.sessionkey, dictDB)
+    if not configs["publico"]["public"]:
+        return {"ok": False}
+    word = request.query.q
+    ops.searchHistoryLogs(word)
+    lemma=disam(word)
+    text=araby.strip_tashkeel(lemma.json()['text'][0])
+    text= re.sub("[إأآٱ]", "ا", text)
+    entries = ops.listEntriesPublic(dictDB, dictID, configs, text)
+    if len(entries) == 1 and entries[0]["exactMatch"]:
+        nabes = ops.readNabesByText(dictDB, dictID, configs, text)
+        return {"dictID": dictID, "dictTitle": configs["ident"]["title"], "dictBlurb": configs["ident"]["blurb"], "publico": configs["publico"], "q": text, "entries": entries, "nabes": nabes}
+    else:
+        nabes = ops.readNabesByText(dictDB, dictID, configs, text)
+        return {"dictID": dictID, "dictTitle": configs["ident"]["title"], "dictBlurb": configs["ident"]["blurb"], "publico": configs["publico"], "q": text, "entries": notFound, "nabes": nabes}
+
+# Added by Waad Alshammari
+# 23/6/2022 
+# Brief: search in all public dict
+@enable_cors
+@get(siteconfig["rootPath"]+"search.json")
+def dictsearch(dictID=""):
+    dictDB = ops.getMainDB()
+    configs="ar"
+    word = request.query.q
+    ops.searchHistoryLogs(word)
+    lemma=disam(word)
+    text=araby.strip_tashkeel(lemma.json()['text'][0]) 
+    text= re.sub("[إأآٱ]", "ا", text)
+    entries = ops.listEntriesPublic(dictDB, dictID, configs, text)
+    notFound="لا توجد نتائج لكلمة "+request.query.q+" في المعاجم الحالية"
+    print("len(entries)",len(entries),file=sys.stderr)
+    if len(entries)==0:
+        nabes = ops.readNabesByText(dictDB, dictID, configs, text)
+        return {"dictID": "كل المعاجم", "q": text, "msg": notFound, "entries": entries, "nabes": nabes}
+    if len(entries) == 1 and entries[0]["exactMatch"]:
+        nabes = ops.readNabesByText(dictDB, dictID, configs, text)
+        return {"dictID": "كل المعاجم", "q": text, "entries": entries, "nabes": nabes}
+    else:
+        nabes = ops.readNabesByText(dictDB, dictID, configs, text)
+        return {"dictID": "كل المعاجم", "q": text, "entries": entries, "nabes": nabes}
+
+
+# Brief: return most searched word in day, month, year
+@enable_cors
+@get(siteconfig["rootPath"]+"mostSearched.json")
+def mostSearched():
+    wordOfMonth,freqM, wordOfYear, freqY= ops.wordsOfYM()
+    wordOfDay, freqD= ops.mostSearched()
+    return {"wordOfDay": wordOfDay, "wordOfDayFreq": freqD, "wordOfMonth": wordOfMonth, "wordOfMonthFreq": freqM, "wordOfYear": wordOfYear, "wordOfYearFreq": freqY}
+
+
+# Added by Waad Alshammari
+# 21/7/2022 
+# Brief: return daily word
+@enable_cors
+@get(siteconfig["rootPath"]+"dailyWords.json")
+def dailyWords2():
+    def1=[]
+    x=ops.dailyWords()
+    dictDB=ops.getDB(x["dict_id"])
+    configs = ops.readDictConfigs(dictDB)
+    adjustedEntryID, xml, _title = ops.readEntry(dictDB, configs, x["id"])
+    print("xml",type(xml), file=sys.stderr)
+    import lxml.etree as ET
+    root = ET.fromstring(xml.encode("utf-8"))
+    for d in root.findall("./Sense/Definition/feat"):
+        print("DEF",d.get('val'),file=sys.stderr )
+        def1.append(d.get('val'))
+    return {"title": x["title"], "dict_id":x["dict_id"], "id": x["id"], "Definition" : def1 }
+
+def disam(sentence):
+
+    url = 'http://camel:5005/lemma'
+    myobj = { 'text': sentence}
+    return requests.post(url, json=myobj)
+    
 @get(siteconfig["rootPath"]+"<dictID>/resave")
 @authDict(["canEdit","canConfig","canUpload"])
 def resave(dictID, user, dictDB, configs):
     if len(configs['subbing']) == 0:
         ops.clearRefac(dictDB)
     stats = ops.getDictStats(dictDB)
-    return template("resave.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "awayUrl": "../../"+dictID+"/edit", "todo": stats["entryCount"]})
+    return template("resave.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "awayUrl": "../../"+dictID+"/edit", "todo": stats["entryCount"]})
 
 @post(siteconfig["rootPath"]+"<dictID>/resave.json")
 @authDict(["canEdit","canConfig","canUpload"])
@@ -898,7 +1027,7 @@ def ontolex(dictID, doctype):
 
 @get(siteconfig["rootPath"] + "api")
 def apitest():
-    return template("api.tpl", **{"siteconfig": siteconfig, "i18n": i18n})
+    return template("api.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump})
 
 @post(siteconfig["rootPath"] + "api/listLang")
 def apilistlang():
@@ -935,7 +1064,7 @@ def apilistlink():
 
 @get(siteconfig["rootPath"] + "push.api")
 def pushtest():
-    return template("pushapi.tpl", **{"siteconfig": siteconfig, "i18n": i18n})
+    return template("pushapi.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump})
 
 @post(siteconfig["rootPath"] + "push.api")
 def pushapi():
@@ -991,7 +1120,7 @@ def pushapi():
                 for entry in entryXmls:
                     if data.get("format") == "teilex0":
                         entry = ops.preprocessLex0(entry)
-                    ops.createEntry(dictDB, configs, None, entry, user["email"], {"apikey": data["apikey"]})
+                    ops.createEntry(dictID, dictDB, configs, None, entry, user["email"], {"apikey": data["apikey"]})
                 return {"success": True}
             else:
                 return {"success": False}
@@ -1011,7 +1140,7 @@ def config(dictID, user, dictDB, configs):
         if not link["source_dict"] in links["in"]:
             links["in"][link["source_dict"]] = []
         links["in"][link["source_dict"]].append(link)
-    return template("links.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "links": links}) 
+    return template("links.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump, "user": user, "dictID": dictID, "dictTitle": configs["ident"]["title"], "links": links}) 
 
 @get(siteconfig["rootPath"] + "<dictID>/links/add")
 @authDict(["canEdit"])
@@ -1161,8 +1290,7 @@ def error404(error):
     if request.path.startswith("/about/") or request.path.startswith("/list/") or request.path.startswith("/lemma/"):
         return error.body
     else:
-        return template("404.tpl", **{"siteconfig": siteconfig, "i18n": i18n})
-
+        return template("404.tpl", **{"siteconfig": siteconfig, "i18n": i18n, "i18nDump": i18nDump})
 
 # deployment
 debug=False
@@ -1178,4 +1306,3 @@ else: # run a standalone server, prefer the paste server if available over the b
         run(host=host, port=port, debug=debug, reloader=debug, server='paste', interval=0.1)
     except ImportError:
         run(host=host, port=port, debug=debug, reloader=debug, interval=0.1)
-

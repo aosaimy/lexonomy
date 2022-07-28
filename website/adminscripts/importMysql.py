@@ -9,12 +9,13 @@ import datetime
 import json
 import xml.sax
 import re
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import ops
 ops.DB = 'mysql'
 
 if len(sys.argv) < 3:
-    print("Usage: ./import.py [-p] PATH_TO_DICTIONARY.sqlite FILE_TO_IMPORT.xml [AUTHOR_EMAIL]")
+    print("Usage: ./import.py [-p] DICTIONARY_ID FILE_TO_IMPORT.xml [AUTHOR_EMAIL]")
     print("       -p   purge dictionary before importing")
     sys.exit()
 
@@ -32,11 +33,11 @@ filename = args[1]
 email = args[2] if len(args)>2 else "IMPORT@LEXONOMY"
 db = mysql.connector.connect(
     host=os.environ['MYSQL_DB_HOST'],
-    user="lexo",
+    user=os.environ['MYSQL_DB_USER'],
     database="lexo_" + dbname,
     password=os.environ['MYSQL_DB_PASSWORD']
 )
-cur = db.cursor(dictionary=True, buffered=True)
+cur = db.cursor(dictionary=True, buffered=True) 
 
 historiography={"importStart": str(datetime.datetime.utcnow()), "filename": os.path.basename(filename)}
 
@@ -92,13 +93,15 @@ import re
 entryCount = len(re.findall('<'+entryTag+'[ >]', xmldata))
 entryInserted = 0
 print("Detected %d entries in '%s' element" % (entryCount, entryTag))
-
 configs = ops.readDictConfigs(cur)
 needs_refac = 1 if len(list(configs["subbing"].keys())) > 0 else 0
 needs_resave = 1 if configs["searchability"].get("searchableElements") and len(configs["searchability"].get("searchableElements")) > 0 else 0
 
 re_entry = re.compile(r'<'+entryTag+'[^>]*>.*?</'+entryTag+'>', re.MULTILINE|re.DOTALL|re.UNICODE)
+
+print(re_entry,xmldata)
 for entry in re.findall(re_entry, xmldata):
+    print((entry ))
     skip = False
     try:
         xml.sax.parseString(entry, xml.sax.handler.ContentHandler())
@@ -113,7 +116,7 @@ for entry in re.findall(re_entry, xmldata):
         entryID = None
         action = "create"
         title = ops.getEntryTitle(entry, configs["titling"])
-        sortkey = ops.getSortTitle(entry, configs["titling"])
+        sortkey = ops.getSortTitle(entry, configs["titling"])  
         if re.match(pat, entry):
             entryID = re.match(pat, entry).group(2)
             cur.execute("select id from entries where id=%s", (entryID,))
@@ -127,14 +130,18 @@ for entry in re.findall(re_entry, xmldata):
         else:
             sql = "insert into entries(xml, needs_refac, needs_resave, needs_refresh, doctype, title, sortkey) values(%s, %s, %s, %s, %s, %s, %s)"
             params = (entry, needs_refac, needs_resave, 0, entryTag, title, sortkey)
-        c = cur.execute(sql, params)
+        cur.execute(sql, params)
         if entryID == None:
-            entryID = c.lastrowid
+            entryID = cur.lastrowid
         cur.execute(f"insert into history(entry_id, action, `when`, email, xml, historiography) values(%s, %s, %s, %s, %s, %s)", (entryID, action, str(datetime.datetime.utcnow()), email, entry, json.dumps(historiography)))
         cur.execute("delete from searchables where entry_id=%s and level=%s", (entryID, 1))
         searchTitle = ops.getEntryTitle(entry, configs["titling"], True)
         cur.execute("insert into searchables(entry_id, txt, level) values(%s, %s, %s)", (entryID, searchTitle, 1))
-        cur.execute("insert into searchables(entry_id, txt, level) values(%s, %s, %s)", (entryID, searchTitle.lower(), 1))
+        # cur.execute("insert into searchables(entry_id, txt, level) values(%s, %s, %s)", (entryID, searchTitle.lower(), 1))
+        #_____
+        # Deleted in 27/6/2022 
+        # brief: the inquiry is repated twice which cause repated entry in the searchable table
+        #_____
         db.commit() 
         entryInserted += 1
         print("\r%.2d%% (%d/%d entries imported)" % ((entryInserted/entryCount*100), entryInserted, entryCount))

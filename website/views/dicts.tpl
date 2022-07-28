@@ -4,7 +4,7 @@
 <html>
 	<head>
 		%include("head.tpl")
-		<title>Lexonomy Dictionaries</title>
+		<title i18n>Lexonomy Dictionaries</title>
 		<script type="text/javascript" src="../libs/screenful/screenful.js"></script>
 		<link type="text/css" rel="stylesheet" href="../libs/screenful/screenful.css" />
 		<script type="text/javascript" src="../libs/screenful/screenful-loc-{{siteconfig['lang']}}.js"></script>
@@ -25,7 +25,7 @@
 		Screenful.Navigator.showNumbers=false;
 		Screenful.Navigator.sortDesc=false;
 		Screenful.Navigator.editorUrl="../dicts/editor/";
-		Screenful.Navigator.flags="[]";
+		Screenful.Navigator.flags=[];
 		Screenful.Navigator.renderer=function(div, entry, searchtext){
 			var title=entry.title;
 			var id=entry.id;

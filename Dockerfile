@@ -10,8 +10,11 @@ RUN apk add --virtual .build-deps gcc g++ libxslt-dev libffi-dev openssl-dev icu
     apk add mysql-client && \
     apk add sqlite && \
     apk add openjdk11-jre  $(: for Naisc ) && \
-    pip install -r requirements.txt && \
+    pip install --no-cache-dir -r requirements.txt && \
     apk del .build-deps && \
-    [ -z "$VER" ] || echo "$VER" > version.txt
+    [ -z "$VER" ] || echo "$VER" > version.txt 
 
-ENTRYPOINT ["python3", "lexonomy.py", "0.0.0.0:8000"]
+# RUN export GOOGLE_APPLICATION_CREDENTIALS="/Users/WaadTSS/Downloads/forward-fuze-354909-7c459293bf4d.json"
+
+
+ENTRYPOINT ["python3", "lexonomy.py", "localhost:8000"]

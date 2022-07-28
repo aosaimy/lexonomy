@@ -5,6 +5,7 @@ import json
 import os
 import os.path
 import sqlite3
+from this import s
 import mysql.connector
 import hashlib
 import random
@@ -20,6 +21,10 @@ from collections import defaultdict
 from icu import Locale, Collator
 import logging
 import sys
+import calendar
+from cachetools import cached, TTLCache
+import pandas as pd
+
 
 
 siteconfig = json.load(open(os.environ.get("LEXONOMY_SITECONFIG",
@@ -42,6 +47,9 @@ defaultDictConfig = {"editing": {"xonomyMode": "nerd", "xonomyTextEditor": "askS
                      "flagging": {"flag_element": "", "flags": []}}
 
 prohibitedDictIDs = ["login", "logout", "make", "signup", "forgotpwd", "changepwd", "users", "dicts", "oneclick", "recoverpwd", "createaccount", "consent", "userprofile", "dictionaries", "about", "list", "lemma", "json", "ontolex", "tei"];
+
+# cache = TTLCache(maxsize=3, ttl=datetime.timedelta(hours=12), timer=datetime.now)
+# cache = TTLCache(maxsize=10, ttl=86400)
 
 # db management
 def getDB(dictID):
@@ -238,10 +246,16 @@ def deleteEntry(db, entryID, email):
     # tell my parents that they need a refresh:
     db.execute (f"update entries set needs_refresh=1 where id in (select parent_id from sub where child_id={ques})", (entryID,))
     # delete me:
-    db.execute (f"delete from entries where id={ques}", (entryID,))
+    db.execute (f"delete from entries where id={ques}", (entryID,)) 
     # tell history that I have been deleted:
     db.execute (f"insert into history(entry_id, action, {SQL_SEP}when{SQL_SEP_C}, email, xml) values({ques},{ques},{ques},{ques},{ques})",
                 (entryID, "delete", datetime.datetime.utcnow(), email, None))
+    # brief: if dict is public delete the entry from the MainDB "lexo"
+    configs = readDictConfigs(db)
+    if configs["publico"]["public"]:
+        MainDB = getMainDB()
+        MainDB.execute(f"delete from entries where id={ques}", (entryID,))
+        MainDB.execute(f"delete from searchables where entry_id={ques}", (entryID,)) #where is the deletion for the entry in dict in the searchable ? I did not find. Thus, I added the deletion for MianDB here
     close_db(db)
 
 def readEntry(db, configs, entryID):
@@ -257,7 +271,7 @@ def readEntry(db, configs, entryID):
         xml = updateEntryLinkables(db, entryID, xml, configs, False, False)
     return entryID, xml, row["title"]
 
-def createEntry(dictDB, configs, entryID, xml, email, historiography):
+def createEntry(dictID, dictDB, configs, entryID, xml, email, historiography):
     xml = setHousekeepingAttributes(entryID, xml, configs["subbing"])
     xml = removeSubentryParentTags(xml)
     title = getEntryTitle(xml, configs["titling"])
@@ -266,25 +280,47 @@ def createEntry(dictDB, configs, entryID, xml, email, historiography):
     needs_refac = 1 if len(list(configs["subbing"].keys())) > 0 else 0
     needs_resave = 1 if configs["searchability"].get("searchableElements") and len(configs["searchability"].get("searchableElements")) > 0 else 0
     # entry title already exists?
-    c = dictDB.execute(f"select id from entries where title = {ques} and id <> {ques}", (title, entryID))
+    c = dictDB.execute(f"select id from entries where title = {ques} and id <> {ques}", (title, entryID)) 
     c = c if c else dictDB
     r = c.fetchone() if c else None
     feedback = {"type": "saveFeedbackHeadwordExists", "info": r["id"]} if r else None
+
+    # Brief: insert the entry in the global DB "lexo" if the dict is public
+    if configs["publico"]["public"]:
+        MainDB = getMainDB()
+        c1 = MainDB.execute(f"select id from entries where title = {ques} and id <> {ques}", (title, entryID))
+        c1 = c1 if c1 else MainDB
+
     if entryID:
         sql = f"insert into entries(id, xml, title, sortkey, needs_refac, needs_resave, doctype) values({ques}, {ques}, {ques}, {ques}, {ques}, {ques}, {ques})"
         params = (entryID, xml, title, sortkey, needs_refac, needs_resave, doctype)
+        if configs["publico"]["public"]:
+            sql1 = f"insert into entries(id, xml, title, sortkey, needs_refac, needs_resave, doctype, dict_id) values({ques}, {ques}, {ques}, {ques}, {ques}, {ques}, {ques}, {ques})"
+            params1 = (entryID, xml, title, sortkey, needs_refac, needs_resave, doctype, dictID)
+
     else:
         sql = f"insert into entries(xml, title, sortkey, needs_refac, needs_resave, doctype) values({ques}, {ques}, {ques}, {ques}, {ques}, {ques})"
         params = (xml, title, sortkey, needs_refac, needs_resave, doctype)
+        if configs["publico"]["public"]:
+            sql1 = f"insert into entries(xml, title, sortkey, needs_refac, needs_resave, doctype, dict_id) values({ques}, {ques}, {ques}, {ques}, {ques}, {ques}, {ques})"
+            params1 = (xml, title, sortkey, needs_refac, needs_resave, doctype, dictID)
     c = dictDB.execute(sql, params)
     c = c if c else dictDB
     entryID = c.lastrowid
     dictDB.execute(f"insert into searchables(entry_id, txt, level) values({ques}, {ques}, {ques})", (entryID, getEntryTitle(xml, configs["titling"], True), 1))
     dictDB.execute(f"insert into history(entry_id, action, {SQL_SEP}when{SQL_SEP_C}, email, xml, historiography) values({ques}, {ques}, {ques}, {ques}, {ques}, {ques})", (entryID, "create", str(datetime.datetime.utcnow()), email, xml, json.dumps(historiography)))
     close_db(dictDB, shouldclose=False)
+
+    # 27/6/2022 
+    # Brief: insert entry in Lexo
+    if configs["publico"]["public"]:
+        c1 = MainDB.execute(sql1, params1)
+        c1 = c1 if c1 else MainDB
+        MainDB.execute(f"insert into searchables (entry_id, txt, level, dict_id) values({ques}, {ques}, {ques}, {ques})", (entryID, getEntryTitle(xml, configs["titling"], True), 1, dictID))
+
     return entryID, xml, feedback
 
-def updateEntry(dictDB, configs, entryID, xml, email, historiography):
+def updateEntry(dictID, dictDB, configs, entryID, xml, email, historiography):
     c = dictDB.execute(f"select id, xml from entries where id={ques}", (entryID, ))
     c = c if c else dictDB
     row = c.fetchone() if c else None
@@ -295,7 +331,7 @@ def updateEntry(dictDB, configs, entryID, xml, email, historiography):
     newxml = re.sub(r" lxnm:(sub)?entryID='[0-9]+'", "", newxml)
     newxml = re.sub(r" lxnm:linkable='[^']+'", "", newxml)
     if not row:
-        adjustedEntryID, adjustedXml, feedback = createEntry(dictDB, configs, entryID, xml, email, historiography)
+        adjustedEntryID, adjustedXml, feedback = createEntry(dictID, dictDB, configs, entryID, xml, email, historiography)
         if configs["links"]:
             adjustedXml = updateEntryLinkables(dictDB, adjustedEntryID, adjustedXml, configs, True, True)
         return adjustedEntryID, adjustedXml, True, feedback
@@ -322,13 +358,23 @@ def updateEntry(dictDB, configs, entryID, xml, email, historiography):
             dictDB.execute(f"update entries set doctype={ques}, xml={ques}, title={ques}, sortkey={ques}, needs_refac={ques}, needs_resave={ques} where id={ques}", (doctype, xml, title, sortkey, needs_refac, needs_resave, entryID))
             dictDB.execute(f"update searchables set txt={ques} where entry_id={ques} and level=1", (getEntryTitle(xml, configs["titling"], True), entryID))
             dictDB.execute(f"insert into history(entry_id, action, {SQL_SEP}when{SQL_SEP_C}, email, xml, historiography) values({ques}, {ques}, {ques}, {ques}, {ques}, {ques})", (entryID, "update", str(datetime.datetime.utcnow()), email, xml, json.dumps(historiography)))
+            if configs["publico"]["public"]:
+                MainDB = getMainDB()
+                MainDB.execute(f"update entries set doctype={ques}, xml={ques}, title={ques}, sortkey={ques}, needs_refac={ques}, needs_resave={ques} where id={ques}", (doctype, xml, title, sortkey, needs_refac, needs_resave, entryID))
+                MainDB.execute(f"update searchables set txt={ques} where entry_id={ques} and level=1", (getEntryTitle(xml, configs["titling"], True), entryID))
             close_db(dictDB, shouldclose=False)
             if configs["links"]:
                 xml = updateEntryLinkables(dictDB, entryID, xml, configs, True, True)
             return entryID, xml, True, feedback
 
 def getEntryTitle(xml, titling, plaintext=False):
-    if titling.get("headwordAnnotationsType") == "advanced" and not plaintext:
+    if titling.get("headwordXpath", False):
+        from lxml import etree as ET
+        root = ET.fromstring(xml)
+        result = root.xpath(titling.get("headwordXpath"));
+        ret = str(result[0]) if len(result) > 0 else ''
+        return ret
+    elif titling.get("headwordAnnotationsType") == "advanced" and not plaintext:
         ret = titling["headwordAnnotationsAdvanced"]
         advancedUsed = False
         for el in re.findall(r"%\([^)]+\)", titling["headwordAnnotationsAdvanced"]):
@@ -373,6 +419,8 @@ def getDoctype(xml):
 def getSortTitle(xml, titling):
     if titling.get("headwordSorting"):
         return getEntryHeadword(xml, titling.get("headwordSorting"))
+    if titling.get("headwordXpath", False):
+        return getEntryTitle(xml, titling);
     return getEntryHeadword(xml, titling.get("headword"))
 
 def generateKey(size=32):
@@ -639,7 +687,8 @@ def attachDict(dictDB, dictID):
     conn.execute(f"delete from dicts where id={ques}", (dictID,))
     conn.execute(f"delete from user_dict where dict_id={ques}", (dictID,))
     title = configs["ident"]["title"]
-    conn.execute(f"insert into dicts(id, title) values ({ques}, {ques})", (dictID, title))
+    blurb = configs["ident"]["blurb"]
+    conn.execute(f"insert into dicts(id, title, blurb) values ({ques}, {ques}, {ques})", (dictID, title, blurb))
     for email in configs["users"]:
         conn.execute(f"insert into user_dict(dict_id, user_email) values ({ques}, {ques})", (dictID, email.lower()))
     close_db(conn)
@@ -1066,15 +1115,23 @@ def readNabesByText(dictDB, dictID, configs, text):
     nabes_before = []
     nabes_after = []
     nabes = []
-    c = dictDB.execute(f"select e1.id, e1.title, e1.sortkey from entries as e1 where e1.doctype={ques} ", (configs["xema"]["root"],))
-    c = c if c else dictDB
-    for r in c.fetchall() if c else []:
-        nabes.append({"id": str(r["id"]), "title": r["title"], "sortkey": r["sortkey"]})
+    if not dictID:
+        c = dictDB.execute(f"select entries.dict_id,  dicts.title as dict_title, dicts.blurb, entries.id, entries.title, entries.sortkey from entries left join dicts on entries.dict_id= dicts.id")
+        c = c if c else dictDB
+        for r in c.fetchall() if c else []:
+            nabes.append({"dict_id":  str(r["dict_id"]), "dictTitle":  r["dict_title"], "dictBlurb":  r["blurb"], "id": str(r["id"]), "title": r["title"], "sortkey": r["sortkey"]})
+        # sort by selected locale
+        collator = Collator.createInstance(Locale(configs))
 
-    # sort by selected locale
-    collator = Collator.createInstance(Locale(getLocale(configs)))
+    else:
+        c = dictDB.execute(f"select e1.id, e1.title, e1.sortkey from entries as e1 where e1.doctype={ques} ", (configs["xema"]["root"],))
+        c = c if c else dictDB
+        for r in c.fetchall() if c else []:
+            nabes.append({"id": str(r["id"]), "title": r["title"], "sortkey": r["sortkey"]})
+        # sort by selected locale
+        collator = Collator.createInstance(Locale(getLocale(configs)))
     nabes.sort(key=lambda x: collator.getSortKey(x['sortkey']))
-   
+    
     #select before/after entries 
     for n in nabes:
         if collator.getSortKey(n["sortkey"]) <= collator.getSortKey(text):
@@ -1201,9 +1258,189 @@ def importfile(dictID, filename, email):
         p = subprocess.Popen(["adminscripts/importMysql.py", dictID, filename, email], stdout=pidfile_f, stderr=errfile_f, start_new_session=True, close_fds=True)
     return {"progressMessage": "Import started. Please wait...", "finished": False, "errors": False}
 
+# 3/7/2022 
+# Brief: save search history logs
+def searchHistoryLogs(word):
+    logsDB = getDB("logs")
+    unixtime=calendar.timegm(datetime.datetime.utcnow().utctimetuple())
+    logsDB.execute(f"insert into SearchHistory(title, {SQL_SEP}when{SQL_SEP}, unixtime) values({ques},{ques},{ques})", (word, datetime.datetime.utcnow(),unixtime))
+
+
+# 3/7/2022 
+# Brief: returns the most frequant word in the search history logs in day
+@cached(cache = TTLCache(maxsize = 30, ttl = 160))    #86400
+def mostSearched():
+    logsDB = getDB("logs")
+    c=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where DAY(FROM_UNIXTIME(unixtime))= {ques}  GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (datetime.datetime.utcnow().day,)) 
+    #just a thought, when I use datetime.datetime.utcnow().day it gonna return the day number ex, 21 ..  Thus, the selection query gonna return all 21's date in each month
+    # if we want to calculate the statsict of start/middle/end of month this is perfect. However, if we want to return today frequancy the  datetime.datetime.utcnow should be used :)
+    c = c if c else logsDB
+    for r in c.fetchall() if c else []:
+        wordOfDay=r["title"]
+        freqD=r["value_occurrence"]
+    return wordOfDay, freqD
+
+
+# 3/7/2022 
+# Brief: returns the most frequant word in the search history logs in month, year
+@cached(cache = TTLCache(maxsize = 30, ttl = 86400))    #86400
+def wordsOfYM():
+    logsDB = getDB("logs")
+    c1=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where MONTH(FROM_UNIXTIME(unixtime))= {ques}  GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (datetime.datetime.utcnow().month,))
+    c1 = c1 if c1 else logsDB
+    for r1 in c1.fetchall() if c1 else []:
+        wordOfMonth=r1["title"]
+        freqM=r1["value_occurrence"]
+
+    c2=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where YEAR(FROM_UNIXTIME(unixtime))= {ques}  GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (datetime.datetime.utcnow().year,))
+    c2 = c2 if c2 else logsDB
+    for r2 in c2.fetchall() if c2 else []:
+        wordOfYear=r2["title"]
+        freqY=r2["value_occurrence"]
+    return wordOfMonth,freqM, wordOfYear, freqY
+
+    # return {"wordOfMonth": wordOfMonth, "wordOfMonthFreq": freqM, "wordOfYear": wordOfYear, "wordOfYearFreq": freqY}
+
+
+# Added by Waad Alshammari
+# 22/6/2022 
+# Brief: insert all puplic dict inot the golable DB "lexo", in table searchable and entries
+
+def insertToGlobalSearchables(dictID):
+
+    MainDB= getMainDB()
+    if DB == 'mysql':
+        sql_list="insert into lexo.searchables select *, \"{0}\" from lexo_{1}.searchables".format(dictID,dictID)
+        c1 = MainDB.execute(sql_list)
+        c1 = c1 if c1 else MainDB
+        sql_list2="insert into lexo.entries select *, \"{0}\" from lexo_{1}.entries".format(dictID,dictID)
+        c2 = MainDB.execute(sql_list2)
+        c2 = c2 if c2 else MainDB
+        return {"success": True}
+
+    elif DB == 'sqlite': 
+        return {"success": False, "state": "elif DB == 'sqlite' is none exists"}
+
+
+# Added by Waad Alshammari
+# 20/7/2022 
+# Brief: return daily word + create daily words for a future year if add=True
+
+def dailyWords(add=False):
+    MainDB= getMainDB()
+    if DB == 'mysql':
+        if add:
+            date= pd.date_range(datetime.datetime.today().replace(hour=0, minute=0, second=0, microsecond=0), periods=365)
+            date=date.strftime("%Y-%m-%d %H:%M:%S").tolist()
+            for d in date: 
+                sql=f"INSERT INTO daily_words (entry_id, txt, dict_id,{SQL_SEP}when{SQL_SEP}) SELECT entry_id, txt, dict_id, {ques} FROM searchables ORDER BY RAND() LIMIT 1"
+                MainDB.execute(sql, (d,))
+    
+    sql=f"SELECT entry_id, txt, dict_id, {SQL_SEP}when{SQL_SEP} FROM daily_words where {SQL_SEP}when{SQL_SEP}= {ques}"
+    c=MainDB.execute(sql, (datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0),))
+    c = c if c else MainDB
+    for r in c.fetchall() if c else []:
+        word=r["txt"]
+        dict_id=r["dict_id"]
+        id=r["entry_id"]
+    return {"title": word, "dict_id": dict_id, "id": id}
+
+
+
+
+# def translate_text(target, text):
+#     """Translates text into the target language.
+
+#     Target must be an ISO 639-1 language code.
+#     See https://g.co/cloud/translate/v2/translate-reference#supported_languages
+#     """
+#     credential_path= "/opt/service/website/forward-fuze-354909-7c459293bf4d.json"
+#     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credential_path
+    
+#     import six
+#     from google.cloud import translate_v2 as translate
+
+#     translate_client = translate.Client()
+
+#     if isinstance(text, six.binary_type):
+#         text = text.decode("utf-8")
+
+#     # Text can also be a sequence of strings, in which case this method
+#     # will return a sequence of results for each text.
+#     result = translate_client.translate(text, target_language=target)
+
+#     print((u"Text: {}".format(result["input"])),file=sys.stderr)
+#     print((u"Translation: {}".format(result["translatedText"])),file=sys.stderr)
+#     print((u"Detected source language: {}".format(result["detectedSourceLanguage"])),file=sys.stderr)
+#     print("result",result,file=sys.stderr)
+
+
+
+# # # from google.cloud import translate_v2
+# # from google.cloud import translate
+# # def translate_text(text="Hello, world!", project_id="forward-fuze-354909"):
+# #     credential_path= "/opt/service/website/forward-fuze-354909-7c459293bf4d.json"
+# #     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credential_path
+
+# #     client = translate.TranslationServiceClient()
+    
+# #     location = "global"
+# #     parent = f"projects/{project_id}/locations/{location}"
+    
+
+# #     response = client.translate_text(
+# #         request={
+# #             "parent": parent,
+# #             "contents": [text],
+# #             "mime_type": "text/plain",
+# #             "source_language_code": "ar",
+# #             "target_language_code": "en",
+# #         }
+
+# #     )
+
+# #     print("response.translations", response.translations,file=sys.stderr)
+
+
+# #     for translation in response.translations:
+# #         print("Translated text: {}".format(translation.translated_text),file=sys.stderr)
+
+# #     # print("Translated text: {}".format(response.extra_data['possible-mistakes']),file=sys.stderr)
+        
+
+
+
+# # # [START translate_text_with_model]
+# # def translate_text_with_model(target, text, model="nmt"):
+# #     """Translates text into the target language.
+
+# #     Make sure your project is allowlisted.
+
+# #     Target must be an ISO 639-1 language code.
+# #     See https://g.co/cloud/translate/v2/translate-reference#supported_languages
+# #     """
+# #     import six
+# #     from google.cloud import translate_v2 as translate
+
+# #     translate_client = translate.Client()
+
+# #     if isinstance(text, six.binary_type):
+# #         text = text.decode("utf-8")
+
+# #     # Text can also be a sequence of strings, in which case this method
+# #     # will return a sequence of results for each text.
+# #     result = translate_client.translate(text, target_language=target, model=model)
+
+# #     print(u"Text: {}".format(result["input"]))
+# #     print(u"Translation: {}".format(result["translatedText"]))
+# #     print(u"Detected source language: {}".format(result["detectedSourceLanguage"]))
+
+
+# # # [END translate_text_with_model]
+
 def checkImportStatus(pidfile, errfile):
     content = ''
-    while content == '':
+    while not content:
         with open(pidfile, "r") as content_file:
             content = content_file.read()
     pid_data = re.split(r"[\n\r]", content)
@@ -1327,17 +1564,36 @@ def listEntries(dictDB, dictID, configs, doctype, searchtext="", modifier="start
 
 def listEntriesPublic(dictDB, dictID, configs, searchtext):
     howmany = 100
-    sql_list = f"select s.txt, min(s.level) as level, e.id, e.title, e.sortkey, case when s.txt={ques} then 1 else 2 end as priority from searchables as s inner join entries as e on e.id=s.entry_id where s.txt like {ques} and e.doctype={ques} group by e.id order by priority, level, s.level"
-    c1 = dictDB.execute(sql_list, ("%"+searchtext+"%", "%"+searchtext+"%", configs["xema"].get("root")))
-    entries = []
-    for r1 in c1.fetchall() if c1 else []:
-        item = {"id": r1["id"], "title": r1["title"], "sortkey": r1["sortkey"], "exactMatch": (r1["level"] == 1 and r1["priority"] == 1)}
-        if r1["level"] > 1:
-            item["title"] += " ← <span class='redirector'>" + r1["txt"] + "</span>"
-        entries.append(item)
+    # Brief: return of list entries in all public dict
+    if not dictID:
+        sql_list = f"select s.txt, min(s.level) as level, e.id, e.title, e.sortkey, e.dict_id, case when s.txt={ques} then 1 else 2 end as priority from searchables as s inner join entries as e on e.id=s.entry_id where s.txt like {ques} group by e.id order by priority, level, s.level, e.dict_id"
+        c1 = dictDB.execute(sql_list, (searchtext, searchtext))
+        c1 = c1 if c1 else dictDB
+        entries = []
+        for r1 in c1.fetchall() if c1 else []:
+            dictDB = getDB(r1["dict_id"])
+            configs = readDictConfigs(dictDB)
+            item = {"dict_id": r1["dict_id"],"dictTitle": configs["ident"]["title"], "dictBlurb": configs["ident"]["blurb"], "id": r1["id"], "title": r1["title"], "sortkey": r1["sortkey"], "exactMatch": (r1["level"] == 1 and r1["priority"] == 1)}
+            if r1["level"] > 1:
+                item["title"] += " ← <span class='redirector'>" + r1["txt"] + "</span>"
+            entries.append(item)
+        collator = Collator.createInstance(Locale("ar"))
 
-    # sort by selected locale
-    collator = Collator.createInstance(Locale(getLocale(configs)))
+    else:
+        sql_list = f"select s.txt, min(s.level) as level, e.id, e.title, e.sortkey, case when s.txt={ques} then 1 else 2 end as priority from searchables as s inner join entries as e on e.id=s.entry_id where s.txt like {ques} and e.doctype={ques} group by e.id order by priority, level, s.level"
+        # c1 = dictDB.execute(sql_list, ("%"+searchtext+"%", "%"+searchtext+"%", configs["xema"].get("root")))
+        c1 = dictDB.execute(sql_list, (searchtext, searchtext, configs["xema"].get("root")))
+
+        c1 = c1 if c1 else dictDB
+        entries = []
+        for r1 in c1.fetchall() if c1 else []:
+            item = {"id": r1["id"], "title": r1["title"], "sortkey": r1["sortkey"], "exactMatch": (r1["level"] == 1 and r1["priority"] == 1)}
+            if r1["level"] > 1:
+                item["title"] += " ← <span class='redirector'>" + r1["txt"] + "</span>"
+            entries.append(item)
+
+        # sort by selected locale
+        collator = Collator.createInstance(Locale(getLocale(configs)))
     entries.sort(key=lambda x: collator.getSortKey(x['sortkey']))
     # and limit
     entries = entries[0:int(howmany)]
@@ -1467,15 +1723,15 @@ def refac(dictDB, dictID, configs):
             subentryID = el.getAttributeNS("http://www.lexonomy.eu/", "subentryID")
             xml = el.toxml()
             if subentryID:
-                subentryID, adjustedXml, changed, feedback = updateEntry(dictDB, configs, subentryID, xml, email.lower(), {"refactoredFrom":entryID})
+                subentryID, adjustedXml, changed, feedback = updateEntry(dictID, dictDB, configs, subentryID, xml, email.lower(), {"refactoredFrom":entryID})
                 el.setAttributeNS("http://www.lexonomy.eu/", "lxnm:subentryID", str(subentryID))
                 dictDB.execute(f"insert into sub(parent_id, child_id) values({ques},{ques})", (entryID, subentryID))
                 if changed:
                     dictDB.execute(f"update entries set needs_refresh=1 where id in (select parent_id from sub where child_id={ques}) and id<>{ques}", (subentryID, entryID))
             else:
-                subentryID, adjustedXml, feedback = createEntry(dictDB, configs, None, xml, email.lower(), {"refactoredFrom":entryID})
+                subentryID, adjustedXml, feedback = createEntry(dictID, dictDB, configs, None, xml, email.lower(), {"refactoredFrom":entryID})
                 el.setAttributeNS("http://www.lexonomy.eu/", "lxnm:subentryID", str(subentryID))
-                subentryID, adjustedXml, changed, feedback = updateEntry(dictDB, configs, subentryID, el.toxml(), email.lower(), {"refactoredFrom":entryID})
+                subentryID, adjustedXml, changed, feedback = updateEntry(dictID, dictDB, configs, subentryID, el.toxml(), email.lower(), {"refactoredFrom":entryID})
                 dictDB.execute(f"insert into sub(parent_id, child_id) values({ques},{ques})", (entryID, subentryID))
                 if DB == 'mysql':
                     dictDB.execute(f"update entries set needs_refresh=1 where id in (select parent_id from sub where child_id={subentryID})", multi=True )
@@ -1552,8 +1808,15 @@ def resave(dictDB, dictID, configs):
         xml = re.sub(r"^<([^>^ ]*) ", r"<\1 xmlns:lxnm='http://www.lexonomy.eu/' ", xml)
         dictDB.execute(f"update entries set needs_resave=0, title={ques}, sortkey={ques} where id={ques}", (getEntryTitle(xml, configs["titling"]), getSortTitle(xml, configs["titling"]), entryID))
         dictDB.execute(f"delete from searchables where entry_id={ques}", (entryID,))
+        if configs["publico"]["public"]:
+            MainDB = getMainDB()
+            MainDB.execute(f"delete from searchables where entry_id={ques}", (entryID,))
         dictDB.execute(f"insert into searchables(entry_id, txt, level) values({ques}, {ques}, {ques})", (entryID, getEntryTitle(xml, configs["titling"], True), 1))
-        dictDB.execute(f"insert into searchables(entry_id, txt, level) values({ques}, {ques}, {ques})", (entryID, getEntryTitle(xml, configs["titling"], True).lower(), 1))
+        # dictDB.execute(f"insert into searchables(entry_id, txt, level) values({ques}, {ques}, {ques})", (entryID, getEntryTitle(xml, configs["titling"], True).lower(), 1))
+        # Deleted 
+        # 27/6/2022 
+        # Brief: the inquiry is repated twice which cause repated entry in the searchable table
+        
         headword = getEntryHeadword(xml, configs["titling"].get("headword"))
         for searchable in getEntrySearchables(xml, configs):
             if searchable != headword:
@@ -2032,7 +2295,7 @@ def get_locales():
     return codes
 
 def getLocale(configs):
-    locale = 'en'
+    locale = 'ar'
     if "locale" in configs["titling"] and configs["titling"]["locale"] != "":
         locale = configs["titling"]["locale"]
     return locale
@@ -2245,3 +2508,16 @@ def elexisGetEntry(dictID, entryID):
     else:
         return None
 
+# the decorator
+def enable_cors(fn):
+    def _enable_cors(*args, **kwargs):
+        # set CORS headers
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Origin, Accept, Content-Type, X-Requested-With, X-CSRF-Token'
+
+        if bottle.request.method != 'OPTIONS':
+            # actual request; reply with the actual response
+            return fn(*args, **kwargs)
+
+    return _enable_cors
