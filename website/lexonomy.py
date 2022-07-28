@@ -963,7 +963,7 @@ def mostSearched():
 @get(siteconfig["rootPath"]+"dailyWords.json")
 def dailyWords2():
     def1=[]
-    x=ops.dailyWords()
+    x=ops.dailyWords() #set True if you want to add daily words for a year
     dictDB=ops.getDB(x["dict_id"])
     configs = ops.readDictConfigs(dictDB)
     adjustedEntryID, xml, _title = ops.readEntry(dictDB, configs, x["id"])
