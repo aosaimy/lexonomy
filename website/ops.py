@@ -23,7 +23,7 @@ import logging
 import sys
 import calendar
 from cachetools import cached, TTLCache
-import pandas as pd
+# import pandas as pd
 
 
 
@@ -1330,9 +1330,14 @@ def dailyWords(add=False):
     MainDB= getMainDB()
     if DB == 'mysql':
         if add:
-            date= pd.date_range(datetime.datetime.today().replace(hour=0, minute=0, second=0, microsecond=0), periods=365)
-            date=date.strftime("%Y-%m-%d %H:%M:%S").tolist()
-            for d in date: 
+            date2=[]
+            dt = datetime.datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+            for d in range(365):
+                td = datetime.timedelta(days=d+1)
+                date2.append(dt+td)
+            # date= pd.date_range(), periods=365)
+            # date=date2.strftime("%Y-%m-%d %H:%M:%S").tolist()
+            for d in date2: 
                 sql=f"INSERT INTO daily_words (entry_id, txt, dict_id,{SQL_SEP}when{SQL_SEP}) SELECT entry_id, txt, dict_id, {ques} FROM searchables ORDER BY RAND() LIMIT 1"
                 MainDB.execute(sql, (d,))
     

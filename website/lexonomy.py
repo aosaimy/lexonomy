@@ -16,7 +16,7 @@ import bottle
 from bottle import (hook, route, get, post, run, template, error, request,
                     response, static_file, abort, redirect, install)
 import pyarabic.araby as araby
-import pandas as pd
+# import pandas as pd
 
 i18nDump = json.dumps(i18n, ensure_ascii=False);
 # configuration
