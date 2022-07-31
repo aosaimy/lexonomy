@@ -930,10 +930,12 @@ def dictsearch(dictID=""):
     configs="ar"
     word = request.query.q
     ops.searchHistoryLogs(word)
+    word2=araby.strip_tashkeel(word) 
     lemma=disam(word)
-    text1=araby.strip_tashkeel(lemma.json()['text'][0]) 
-    text= re.sub("[إآٱ]", "ا", text1)
-    entries = ops.listEntriesPublic(dictDB, dictID, configs, text)
+    text=araby.strip_tashkeel(lemma.json()['text'][0]) 
+    text= re.sub("[إآٱ]", "ا", text)
+    print("text ", text, "text2 ", word2, file=sys.stderr)
+    entries = ops.listEntriesPublic(dictDB, dictID, configs, text, word2)
     notFound="لا توجد نتائج لكلمة "+request.query.q+" في المعاجم الحالية"
     print("len(entries)",len(entries),file=sys.stderr)
     if len(entries)==0:
@@ -967,13 +969,19 @@ def dailyWords2():
     dictDB=ops.getDB(x["dict_id"])
     configs = ops.readDictConfigs(dictDB)
     adjustedEntryID, xml, _title = ops.readEntry(dictDB, configs, x["id"])
-    print("xml",type(xml), file=sys.stderr)
+    # print("xml",type(xml), file=sys.stderr)
     import lxml.etree as ET
     root = ET.fromstring(xml.encode("utf-8"))
+    for l in root.findall("./Lemma/feat"):
+        print(l.get('att'),file=sys.stderr)
+        if l.get('att')=='WittenForm' or l.get('att')=="writtenForm":
+            text=l.get('val')
+            print("text",text,file=sys.stderr)
+
     for d in root.findall("./Sense/Definition/feat"):
-        print("DEF",d.get('val'),file=sys.stderr )
+        # print("DEF",d.get('val'),file=sys.stderr )
         def1.append(d.get('val'))
-    return {"title": x["title"], "dict_id":x["dict_id"], "id": x["id"], "Definition" : def1 }
+    return {"title": text, "dict_id":x["dict_id"], "id": x["id"], "Definition" : def1 }
 
 def disam(sentence):
 

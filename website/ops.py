@@ -1112,22 +1112,25 @@ def readNabesByEntryID(dictDB, dictID, entryID, configs):
     return nabes_before[-8:] + nabes_after[0:15]
 
 def readNabesByText(dictDB, dictID, configs, text):
+    import lxml.etree as ET
     nabes_before = []
     nabes_after = []
     nabes = []
+    nabesTashkeel=[]
     if not dictID:
-        c = dictDB.execute(f"select entries.dict_id,  dicts.title as dict_title, dicts.blurb, entries.id, entries.title, entries.sortkey from entries left join dicts on entries.dict_id= dicts.id")
+        c = dictDB.execute(f"select entries.dict_id,  dicts.title as dict_title, dicts.blurb, entries.id, entries.xml, entries.title, entries.sortkey from entries left join dicts on entries.dict_id= dicts.id")
         c = c if c else dictDB
         for r in c.fetchall() if c else []:
-            nabes.append({"dict_id":  str(r["dict_id"]), "dictTitle":  r["dict_title"], "dictBlurb":  r["blurb"], "id": str(r["id"]), "title": r["title"], "sortkey": r["sortkey"]})
+            nabes.append({"dict_id":  str(r["dict_id"]), "dictTitle":  r["dict_title"] , "xml":  r["xml"], "dictBlurb":  r["blurb"], "id": str(r["id"]), "title": r["title"], "sortkey": r["sortkey"]})
+            #r["dict_title"]
         # sort by selected locale
         collator = Collator.createInstance(Locale(configs))
 
     else:
-        c = dictDB.execute(f"select e1.id, e1.title, e1.sortkey from entries as e1 where e1.doctype={ques} ", (configs["xema"]["root"],))
+        c = dictDB.execute(f"select e1.id, e1.title, e1.sortkey, e1.xml from entries as e1 where e1.doctype={ques} ", (configs["xema"]["root"],))
         c = c if c else dictDB
         for r in c.fetchall() if c else []:
-            nabes.append({"id": str(r["id"]), "title": r["title"], "sortkey": r["sortkey"]})
+            nabes.append({"id": str(r["id"]), "title": r["title"], "xml":r["xml"],"sortkey": r["sortkey"]})
         # sort by selected locale
         collator = Collator.createInstance(Locale(getLocale(configs)))
     nabes.sort(key=lambda x: collator.getSortKey(x['sortkey']))
@@ -1138,7 +1141,18 @@ def readNabesByText(dictDB, dictID, configs, text):
             nabes_before.append(n)
         else:
             nabes_after.append(n)
-    return nabes_before[-8:] + nabes_after[0:15]
+    nabes2=nabes_before[-5:] + nabes_after[0:15]
+    print("nnnnnn",n,file=sys.stderr)
+
+    for n in nabes2:
+        root = ET.fromstring(n["xml"].encode("utf-8"))
+        for l in root.findall("./Lemma/feat"):
+                if l.get('att')=='WittenForm' or l.get('att')=="writtenForm":
+                    word=l.get('val')
+                    print("word",word,file=sys.stderr)
+                    nabesTashkeel.append({"dict_id":  str(n["dict_id"]), "dictTitle":  n["dictTitle"] , "dictBlurb":  n["dictBlurb"], "id": str(n["id"]), "title": word, "sortkey": n["sortkey"]})
+    # return nabes1
+    return nabesTashkeel
 
 def readRandoms(dictDB):
     configs = readDictConfigs(dictDB)
@@ -1271,7 +1285,9 @@ def searchHistoryLogs(word):
 @cached(cache = TTLCache(maxsize = 30, ttl = 160))    #86400
 def mostSearched():
     logsDB = getDB("logs")
-    c=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where DAY(FROM_UNIXTIME(unixtime))= {ques}  GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (datetime.datetime.utcnow().day,)) 
+    unixtime=calendar.timegm(datetime.datetime.utcnow().utctimetuple())
+    c=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where FROM_UNIXTIME(unixtime,'%Y-%m-%d')= FROM_UNIXTIME({ques},'%Y-%m-%d') GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (unixtime,)) 
+    print(unixtime,file=sys.stderr)
     #just a thought, when I use datetime.datetime.utcnow().day it gonna return the day number ex, 21 ..  Thus, the selection query gonna return all 21's date in each month
     # if we want to calculate the statsict of start/middle/end of month this is perfect. However, if we want to return today frequancy the  datetime.datetime.utcnow should be used :)
     c = c if c else logsDB
@@ -1567,12 +1583,13 @@ def listEntries(dictDB, dictID, configs, doctype, searchtext="", modifier="start
     total = r2["total"]
     return total, entries, False
 
-def listEntriesPublic(dictDB, dictID, configs, searchtext):
+def listEntriesPublic(dictDB, dictID, configs, searchtext,searchtext2 ):
     howmany = 100
     # Brief: return of list entries in all public dict
     if not dictID:
-        sql_list = f"select s.txt, min(s.level) as level, e.id, e.title, e.sortkey, e.dict_id, case when s.txt={ques} then 1 else 2 end as priority from searchables as s inner join entries as e on e.id=s.entry_id where s.txt like {ques} group by e.id order by priority, level, s.level, e.dict_id"
-        c1 = dictDB.execute(sql_list, (searchtext, searchtext))
+        # sql_list = f"select s.txt, min(s.level) as level, e.id, e.title, e.sortkey, e.dict_id, case when s.txt={ques} then 1 else 2 end as priority from searchables as s inner join entries as e on e.id=s.entry_id where s.txt like {ques} group by e.id order by priority, level, s.level, e.dict_id"
+        sql_list =f"select s.txt, min(s.level) as level, e.id, e.title, e.sortkey, e.dict_id, case when (s.txt={ques} or s.txt={ques}) then 1 else 2 end as priority from searchables as s inner join entries as e on e.id=s.entry_id where s.txt like {ques} or s.txt like {ques} group by e.id order by priority, level, s.level, e.dict_id"
+        c1 = dictDB.execute(sql_list, (searchtext, searchtext2, searchtext, searchtext2))
         c1 = c1 if c1 else dictDB
         entries = []
         for r1 in c1.fetchall() if c1 else []:
