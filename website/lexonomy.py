@@ -931,14 +931,14 @@ def dictsearch(dictID=""):
     word = request.query.q
     ops.searchHistoryLogs(word)
     lemma=disam(word)
-    text=araby.strip_tashkeel(lemma.json()['text'][0]) 
-    text= re.sub("[إأآٱ]", "ا", text)
+    text1=araby.strip_tashkeel(lemma.json()['text'][0]) 
+    text= re.sub("[إآٱ]", "ا", text1)
     entries = ops.listEntriesPublic(dictDB, dictID, configs, text)
     notFound="لا توجد نتائج لكلمة "+request.query.q+" في المعاجم الحالية"
     print("len(entries)",len(entries),file=sys.stderr)
     if len(entries)==0:
         nabes = ops.readNabesByText(dictDB, dictID, configs, text)
-        return {"dictID": "كل المعاجم", "q": text, "msg": notFound, "entries": entries, "nabes": nabes}
+        return {"dictID": "كل المعاجم", "q": text1, "msg": notFound, "entries": entries, "nabes": nabes}
     if len(entries) == 1 and entries[0]["exactMatch"]:
         nabes = ops.readNabesByText(dictDB, dictID, configs, text)
         return {"dictID": "كل المعاجم", "q": text, "entries": entries, "nabes": nabes}
