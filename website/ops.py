@@ -1282,6 +1282,7 @@ def searchHistoryLogs(word):
 # Brief: returns the most frequant word in the search history logs in day
 @cached(cache = TTLCache(maxsize = 30, ttl = 160))    #86400
 def mostSearched():
+    wordOfDay=""
     logsDB = getDB("logs")
     unixtime=calendar.timegm(datetime.datetime.utcnow().utctimetuple())
     c=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where FROM_UNIXTIME(unixtime,'%Y-%m-%d')= FROM_UNIXTIME({ques},'%Y-%m-%d') GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (unixtime,)) 
@@ -1289,6 +1290,8 @@ def mostSearched():
     for r in c.fetchall() if c else []:
         wordOfDay=r["title"]
         freqD=r["value_occurrence"]
+    if not wordOfDay:
+        return "لم يتم البحث عن كلمة جديدة حتى الآن", 0
     return wordOfDay, freqD
 
 
@@ -1296,6 +1299,8 @@ def mostSearched():
 # Brief: returns the most frequant word in the search history logs in month, year
 @cached(cache = TTLCache(maxsize = 30, ttl = 86400))    #86400
 def wordsOfYM():
+    wordOfMonth=""
+    wordOfYear=""
     logsDB = getDB("logs")
     unixtime=calendar.timegm(datetime.datetime.utcnow().utctimetuple())
     c1=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where FROM_UNIXTIME(unixtime,'%Y-%m')= FROM_UNIXTIME({ques},'%Y-%m') GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (unixtime,))
@@ -1304,12 +1309,16 @@ def wordsOfYM():
     for r1 in c1.fetchall() if c1 else []:
         wordOfMonth=r1["title"]
         freqM=r1["value_occurrence"]
+    if not wordOfMonth:
+        return "لم يتم البحث عن كلمة جديدة حتى الآن", 0
 
     c2=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where YEAR(FROM_UNIXTIME(unixtime))= {ques}  GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (datetime.datetime.utcnow().year,))
     c2 = c2 if c2 else logsDB
     for r2 in c2.fetchall() if c2 else []:
         wordOfYear=r2["title"]
         freqY=r2["value_occurrence"]
+    if not wordOfYear:
+        return "لم يتم البحث عن كلمة جديدة حتى الآن", 0
     return wordOfMonth,freqM, wordOfYear, freqY
 
     # return {"wordOfMonth": wordOfMonth, "wordOfMonthFreq": freqM, "wordOfYear": wordOfYear, "wordOfYearFreq": freqY}
