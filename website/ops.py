@@ -1111,7 +1111,7 @@ def readNabesByEntryID(dictDB, dictID, entryID, configs):
             entryID_seen = True
     return nabes_before[-8:] + nabes_after[0:15]
 
-def readNabesByText(dictDB, dictID, configs, text):
+def readNabesByText(dictDB, dictID, configs, text, word2):
     import lxml.etree as ET
     nabes_before = []
     nabes_after = []
@@ -1141,15 +1141,13 @@ def readNabesByText(dictDB, dictID, configs, text):
             nabes_before.append(n)
         else:
             nabes_after.append(n)
-    nabes2=nabes_before[-5:] + nabes_after[0:15]
-    print("nnnnnn",n,file=sys.stderr)
-
+    nabes2=nabes_before[-8:] + nabes_after[0:15]
     for n in nabes2:
-        root = ET.fromstring(n["xml"].encode("utf-8"))
-        for l in root.findall("./Lemma/feat"):
+        if (n["title"]==text or n["title"]==word2)==False:
+            root = ET.fromstring(n["xml"].encode("utf-8"))
+            for l in root.findall("./Lemma/feat"):
                 if l.get('att')=='WittenForm' or l.get('att')=="writtenForm":
                     word=l.get('val')
-                    print("word",word,file=sys.stderr)
                     nabesTashkeel.append({"dict_id":  str(n["dict_id"]), "dictTitle":  n["dictTitle"] , "dictBlurb":  n["dictBlurb"], "id": str(n["id"]), "title": word, "sortkey": n["sortkey"]})
     # return nabes1
     return nabesTashkeel
@@ -1287,9 +1285,6 @@ def mostSearched():
     logsDB = getDB("logs")
     unixtime=calendar.timegm(datetime.datetime.utcnow().utctimetuple())
     c=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where FROM_UNIXTIME(unixtime,'%Y-%m-%d')= FROM_UNIXTIME({ques},'%Y-%m-%d') GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (unixtime,)) 
-    print(unixtime,file=sys.stderr)
-    #just a thought, when I use datetime.datetime.utcnow().day it gonna return the day number ex, 21 ..  Thus, the selection query gonna return all 21's date in each month
-    # if we want to calculate the statsict of start/middle/end of month this is perfect. However, if we want to return today frequancy the  datetime.datetime.utcnow should be used :)
     c = c if c else logsDB
     for r in c.fetchall() if c else []:
         wordOfDay=r["title"]
@@ -1302,7 +1297,9 @@ def mostSearched():
 @cached(cache = TTLCache(maxsize = 30, ttl = 86400))    #86400
 def wordsOfYM():
     logsDB = getDB("logs")
-    c1=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where MONTH(FROM_UNIXTIME(unixtime))= {ques}  GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (datetime.datetime.utcnow().month,))
+    unixtime=calendar.timegm(datetime.datetime.utcnow().utctimetuple())
+    c1=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where FROM_UNIXTIME(unixtime,'%Y-%m')= FROM_UNIXTIME({ques},'%Y-%m') GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (unixtime,))
+    # c1=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where MONTH(FROM_UNIXTIME(unixtime))= {ques}  GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (datetime.datetime.utcnow().month,))
     c1 = c1 if c1 else logsDB
     for r1 in c1.fetchall() if c1 else []:
         wordOfMonth=r1["title"]

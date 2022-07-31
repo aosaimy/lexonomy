@@ -934,18 +934,16 @@ def dictsearch(dictID=""):
     lemma=disam(word)
     text=araby.strip_tashkeel(lemma.json()['text'][0]) 
     text= re.sub("[إآٱ]", "ا", text)
-    print("text ", text, "text2 ", word2, file=sys.stderr)
     entries = ops.listEntriesPublic(dictDB, dictID, configs, text, word2)
     notFound="لا توجد نتائج لكلمة "+request.query.q+" في المعاجم الحالية"
-    print("len(entries)",len(entries),file=sys.stderr)
     if len(entries)==0:
-        nabes = ops.readNabesByText(dictDB, dictID, configs, text)
-        return {"dictID": "كل المعاجم", "q": text1, "msg": notFound, "entries": entries, "nabes": nabes}
+        nabes = ops.readNabesByText(dictDB, dictID, configs, text, word2)
+        return {"dictID": "كل المعاجم", "q": text, "msg": notFound, "entries": entries, "nabes": nabes}
     if len(entries) == 1 and entries[0]["exactMatch"]:
-        nabes = ops.readNabesByText(dictDB, dictID, configs, text)
+        nabes = ops.readNabesByText(dictDB, dictID, configs, text, word2)
         return {"dictID": "كل المعاجم", "q": text, "entries": entries, "nabes": nabes}
     else:
-        nabes = ops.readNabesByText(dictDB, dictID, configs, text)
+        nabes = ops.readNabesByText(dictDB, dictID, configs, text, word2)
         return {"dictID": "كل المعاجم", "q": text, "entries": entries, "nabes": nabes}
 
 
