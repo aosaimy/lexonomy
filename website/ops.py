@@ -1310,7 +1310,7 @@ def wordsOfYM():
         wordOfMonth=r1["title"]
         freqM=r1["value_occurrence"]
     if not wordOfMonth:
-        return "لم يتم البحث عن كلمة جديدة حتى الآن", 0
+        wordOfMonth,freqM= "لم يتم البحث عن كلمة جديدة حتى الآن", 0
 
     c2=logsDB.execute(f"SELECT title, COUNT(title) AS `value_occurrence` FROM SearchHistory where YEAR(FROM_UNIXTIME(unixtime))= {ques}  GROUP BY title ORDER BY `value_occurrence` DESC LIMIT 1;", (datetime.datetime.utcnow().year,))
     c2 = c2 if c2 else logsDB
@@ -1318,7 +1318,7 @@ def wordsOfYM():
         wordOfYear=r2["title"]
         freqY=r2["value_occurrence"]
     if not wordOfYear:
-        return "لم يتم البحث عن كلمة جديدة حتى الآن", 0
+        wordOfYear, freqY= "لم يتم البحث عن كلمة جديدة حتى الآن", 0
     return wordOfMonth,freqM, wordOfYear, freqY
 
     # return {"wordOfMonth": wordOfMonth, "wordOfMonthFreq": freqM, "wordOfYear": wordOfYear, "wordOfYearFreq": freqY}
